@@ -29,7 +29,7 @@ const FramePanel: React.FC<Props> = ({ frame, onUpdate }) => {
       </div>
 
       {/* Preset frames */}
-      <div className="flex gap-2 px-4 pb-3 overflow-x-auto flex-shrink-0" style={{ scrollbarWidth: 'none' }}>
+      <div className="flex gap-2 px-4 pb-3 panel-scroll-x flex-shrink-0">
         {FRAME_PRESETS.map(p => (
           <button key={p.id}
             onClick={() => onUpdate({ type: p.id, color: p.color, size: p.size, cornerRadius: p.cornerRadius })}
@@ -82,7 +82,7 @@ const FramePanel: React.FC<Props> = ({ frame, onUpdate }) => {
           {/* Color palette */}
           <div className="flex items-center gap-2">
             <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', width: 40 }}>Color</span>
-            <div className="flex gap-1.5 overflow-x-auto flex-1" style={{ scrollbarWidth: 'none' }}>
+            <div className="flex gap-1.5 panel-scroll-x flex-1">
               {COLORS.map(c => (
                 <button key={c} onClick={() => onUpdate({ color: c })}
                   className="flex-shrink-0 w-6 h-6 rounded-full transition-all"

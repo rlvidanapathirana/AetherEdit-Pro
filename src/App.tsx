@@ -1,119 +1,426 @@
-import React, { useState, useRef, useCallback } from 'react'
+import React, { useState, useRef, useCallback, useEffect } from 'react'
 import {
   SlidersHorizontal, Film, Crop, Type, PenTool,
   Smile, Frame as FrameIcon, Download, ZoomIn, ZoomOut, X,
-  Upload, MoreHorizontal, Sun, Crown
+  Upload, MoreHorizontal, Sun, Crown, LayoutTemplate, Layers, Plus, Maximize, Scissors, Sparkles, Shapes,
+  Undo2, Redo2
 } from 'lucide-react'
-import { useImageEditor } from './editor/useImageEditor'
+import { useImageEditor, DEFAULT_ADJUSTMENTS } from './editor/useImageEditor'
+import type { Adjustments, HslChannel, HslMixer } from './editor/useImageEditor'
 import AdjustPanel from './editor/panels/AdjustPanel'
 import FiltersPanel from './editor/panels/FiltersPanel'
+import ProfilesPanel from './editor/panels/ProfilesPanel'
 import CropPanel, { CropOverlay } from './editor/panels/CropPanel'
+import GeometryPanel from './editor/panels/GeometryPanel'
 import TextPanel from './editor/panels/TextPanel'
 import { DrawPanel, useDrawCanvas } from './editor/panels/DrawPanel'
 import type { DrawSettings } from './editor/panels/DrawPanel'
 import StickersPanel from './editor/panels/StickersPanel'
 import FramePanel from './editor/panels/FramePanel'
+import SelectivePanel from './editor/panels/SelectivePanel'
+import LensBlurPanel from './editor/panels/LensBlurPanel'
+import HealingPanel from './editor/panels/HealingPanel'
+import PresetsPanel from './editor/panels/PresetsPanel'
+import VersionsPanel from './editor/panels/VersionsPanel'
 import ProPanel from './editor/panels/ProPanel'
 import MorePanel from './editor/panels/MorePanel'
+import LayersPanel from './editor/panels/LayersPanel'
+import CutoutPanel from './editor/panels/CutoutPanel'
+import { OverlayEditor } from './editor/components/OverlayEditor'
 
-type ToolId = 'adjust' | 'filters' | 'crop' | 'text' | 'draw' | 'stickers' | 'frame' | 'pro' | 'more'
+type ToolId = 'adjust' | 'profiles' | 'filters' | 'cutout' | 'crop' | 'geometry' | 'selective' | 'lensblur' | 'healing' | 'draw' | 'text' | 'stickers' | 'frame' | 'layers' | 'presets' | 'versions' | 'pro' | 'more'
 
-const TOOLS: { id: ToolId; icon: React.ReactNode; label: string }[] = [
-  { id: 'adjust',   icon: <SlidersHorizontal size={19} />, label: 'Adjust'   },
-  { id: 'filters',  icon: <Film size={19} />,              label: 'Filters'  },
-  { id: 'crop',     icon: <Crop size={19} />,              label: 'Crop'     },
-  { id: 'draw',     icon: <PenTool size={19} />,           label: 'Draw'     },
-  { id: 'text',     icon: <Type size={19} />,              label: 'Text'     },
-  { id: 'stickers', icon: <Smile size={19} />,             label: 'Stickers' },
-  { id: 'frame',    icon: <FrameIcon size={19} />,         label: 'Frame'    },
-  { id: 'pro',      icon: <Crown size={19} color="#ff2299"/>, label: 'Pro'   },
-  { id: 'more',     icon: <MoreHorizontal size={19} />,    label: 'More'     },
+const TOOLS: { id: ToolId; icon: React.ReactNode; label: string; highlight?: string }[] = [
+  { id: 'adjust',   icon: <SlidersHorizontal size={19} />, label: 'Adjust' },
+  { id: 'profiles', icon: <LayoutTemplate size={19} />, label: 'Profiles' },
+  { id: 'filters',  icon: <Film size={19} />, label: 'Filters' },
+  { id: 'cutout',   icon: <Scissors size={19} />, label: 'Cutout', highlight: '#00F0FF' },
+  { id: 'crop',     icon: <Crop size={19} />, label: 'Crop' },
+  { id: 'geometry', icon: <Shapes size={19} />, label: 'Geometry' },
+  { id: 'selective',icon: <Scissors size={19} />, label: 'Selective' },
+  { id: 'lensblur', icon: <Sparkles size={19} />, label: 'Lens Blur' },
+  { id: 'healing',  icon: <Layers size={19} />, label: 'Retouch' },
+  { id: 'draw',     icon: <PenTool size={19} />, label: 'Draw' },
+  { id: 'text',     icon: <Type size={19} />, label: 'Text' },
+  { id: 'stickers', icon: <Smile size={19} />, label: 'Stickers' },
+  { id: 'frame',    icon: <FrameIcon size={19} />, label: 'Frame' },
+  { id: 'layers',   icon: <Layers size={19} />, label: 'Layers' },
+  { id: 'presets',  icon: <LayoutTemplate size={19} />, label: 'Presets' },
+  { id: 'versions', icon: <Layers size={19} />, label: 'Versions' },
+  { id: 'pro',      icon: <Crown size={19} color="#ff2299" fill="rgba(255,34,153,0.2)"/>, label: 'Pro', highlight: '#ff2299' },
+  { id: 'more',     icon: <MoreHorizontal size={19} />, label: 'More' },
 ]
-
-// Draggable layer mixin
-function useDraggable(
-  id: string,
-  containerRef: React.RefObject<HTMLDivElement>,
-  onUpdate: (id: string, x: number, y: number) => void
-) {
-  return (e: React.PointerEvent) => {
-    e.preventDefault()
-    const el = e.currentTarget as HTMLElement
-    const container = containerRef.current
-    if (!container) return
-    const rect = container.getBoundingClientRect()
-    const startX = e.clientX, startY = e.clientY
-    const origLeft = parseFloat(el.style.left), origTop = parseFloat(el.style.top)
-    const move = (mv: PointerEvent) => {
-      const nx = Math.max(0, Math.min(100, origLeft + ((mv.clientX - startX) / rect.width) * 100))
-      const ny = Math.max(0, Math.min(100, origTop  + ((mv.clientY - startY) / rect.height) * 100))
-      onUpdate(id, nx, ny)
-    }
-    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-  }
-}
 
 export default function App() {
   const editor = useImageEditor()
   const [activeTool, setActiveTool] = useState<ToolId>('adjust')
   const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
   const [showComparison, setShowComparison] = useState(false)
-  const [comparisonX, setComparisonX] = useState(50)
+  const [activeOverlayId, setActiveOverlayId] = useState<string | null>(null)
   const [drawSettings, setDrawSettings] = useState<DrawSettings>({ color: '#ffffff', size: 8, opacity: 100, tool: 'pen' })
-  const fileRef  = useRef<HTMLInputElement>(null)
+  const [healingSettings, setHealingSettings] = useState({
+    mode: 'spot' as 'spot' | 'clone',
+    size: 20,
+    isSettingCloneSource: false,
+    cloneSource: null as { x: number; y: number } | null,
+  })
+  const isHealingDrawing = useRef(false)
+  const healingPoints = useRef<{ x: number; y: number }[]>([])
+  const fileRef = useRef<HTMLInputElement>(null)
+  const overlayFileRef = useRef<HTMLInputElement>(null)
   const canvasAreaRef = useRef<HTMLDivElement>(null) as React.RefObject<HTMLDivElement>
+  const imageContainerRef = useRef<HTMLDivElement>(null) as React.RefObject<HTMLDivElement>
 
-  const drawEvents = useDrawCanvas(
-    editor.drawRef,
-    canvasAreaRef,
-    editor.strokes,
-    editor.addStroke,
-    drawSettings
-  )
+  const drawEvents = useDrawCanvas(editor.drawRef, canvasAreaRef, editor.strokes, editor.addStroke, drawSettings)
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    const file = Array.from(e.dataTransfer.files).find(f => f.type.startsWith('image/'))
-    if (file) { editor.loadImage(file); setZoom(1) }
-  }, [editor])
+  const handleHealingPointerDown = useCallback((e: React.PointerEvent) => {
+    const img = editor.imageRef.current
+    if (!img) return
 
-  const handleFileInput = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) { editor.loadImage(file); setZoom(1) }
-    e.target.value = ''
-  }, [editor])
+    const rect = img.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    
+    // Calculate percentage coords
+    const pctX = (x / rect.width) * 100
+    const pctY = (y / rect.height) * 100
+
+    if (healingSettings.isSettingCloneSource) {
+      setHealingSettings(prev => ({
+        ...prev,
+        cloneSource: { x: pctX, y: pctY },
+        isSettingCloneSource: false
+      }))
+      return
+    }
+
+    isHealingDrawing.current = true
+    healingPoints.current = [{ x, y }]
+
+    const canvas = editor.drawRef.current
+    if (canvas) {
+      canvas.width = rect.width
+      canvas.height = rect.height
+      canvas.setPointerCapture(e.pointerId)
+      const ctx = canvas.getContext('2d')!
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      ctx.fillStyle = healingSettings.mode === 'spot' ? 'rgba(239, 68, 68, 0.45)' : 'rgba(99, 102, 241, 0.45)'
+      ctx.beginPath()
+      ctx.arc(x, y, healingSettings.size / 2, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }, [healingSettings, editor])
+
+  const handleHealingPointerMove = useCallback((e: React.PointerEvent) => {
+    if (!isHealingDrawing.current) return
+    const img = editor.imageRef.current
+    const canvas = editor.drawRef.current
+    if (!img || !canvas) return
+
+    const rect = img.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+
+    healingPoints.current.push({ x, y })
+    const pts = healingPoints.current
+
+    const ctx = canvas.getContext('2d')!
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+    // Draw the translucent stroke mask
+    ctx.save()
+    ctx.strokeStyle = healingSettings.mode === 'spot' ? 'rgba(239, 68, 68, 0.45)' : 'rgba(99, 102, 241, 0.45)'
+    ctx.lineWidth = healingSettings.size
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+
+    ctx.beginPath()
+    ctx.moveTo(pts[0].x, pts[0].y)
+    for (let i = 1; i < pts.length; i++) {
+      const mid = { x: (pts[i-1].x + pts[i].x)/2, y: (pts[i-1].y + pts[i].y)/2 }
+      ctx.quadraticCurveTo(pts[i-1].x, pts[i-1].y, mid.x, mid.y)
+    }
+    ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y)
+    ctx.stroke()
+    ctx.restore()
+
+    // If Clone Stamp mode, draw source circle, line, and moving destination circle
+    if (healingSettings.mode === 'clone' && healingSettings.cloneSource) {
+      const srcClientX = (healingSettings.cloneSource.x / 100) * rect.width
+      const srcClientY = (healingSettings.cloneSource.y / 100) * rect.height
+      const startX = pts[0].x
+      const startY = pts[0].y
+      const dx = srcClientX - startX
+      const dy = srcClientY - startY
+
+      ctx.save()
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)'
+      ctx.lineWidth = 1.5
+      ctx.setLineDash([4, 4])
+      ctx.beginPath()
+      ctx.moveTo(x, y)
+      ctx.lineTo(x + dx, y + dy)
+      ctx.stroke()
+
+      // Draw active source cursor
+      ctx.strokeStyle = '#6366F1'
+      ctx.setLineDash([])
+      ctx.beginPath()
+      ctx.arc(x + dx, y + dy, healingSettings.size / 2, 0, Math.PI * 2)
+      ctx.stroke()
+      
+      // Draw crosshair inside source cursor
+      ctx.beginPath()
+      ctx.moveTo(x + dx - 6, y + dy)
+      ctx.lineTo(x + dx + 6, y + dy)
+      ctx.moveTo(x + dx, y + dy - 6)
+      ctx.lineTo(x + dx, y + dy + 6)
+      ctx.stroke()
+      ctx.restore()
+    }
+  }, [healingSettings, editor])
+
+  const handleHealingPointerUp = useCallback(async (e: React.PointerEvent) => {
+    if (!isHealingDrawing.current) return
+    isHealingDrawing.current = false
+
+    const canvas = editor.drawRef.current
+    if (canvas) {
+      const ctx = canvas.getContext('2d')!
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+    }
+
+    if (healingPoints.current.length > 0) {
+      await editor.applyHealing(
+        healingPoints.current,
+        healingSettings.size,
+        healingSettings.mode,
+        healingSettings.cloneSource
+      )
+    }
+    healingPoints.current = []
+  }, [healingSettings, editor])
+
+  const haptic = () => { if (navigator.vibrate) navigator.vibrate(10) }
 
   const handleToolChange = (tool: ToolId) => {
+    haptic()
     setActiveTool(tool)
     setShowComparison(false)
   }
 
-  // ── Frame CSS ─────────────────────────────────────────────────────────────
-  const frameStyle: React.CSSProperties = {}
-  const { frame } = editor
-  if (frame.type !== 'none' && frame.size > 0) {
-    frameStyle.border = `${frame.size}px solid ${frame.color}`
-    frameStyle.borderRadius = frame.cornerRadius ? `${frame.cornerRadius}px` : 0
-    if (frame.type === 'neon-cyan') frameStyle.boxShadow = `0 0 20px ${frame.color}, inset 0 0 20px rgba(0,240,255,0.1)`
-    if (frame.type === 'neon-violet') frameStyle.boxShadow = `0 0 20px ${frame.color}`
-    if (frame.type === 'double') frameStyle.outline = `3px solid ${frame.color}`
-  }
+  // ── Unified Zoom & Pan Gestures (Pointer + Wheel) ────────────────────────
+  const activePointers = useRef<Map<number, { x: number; y: number }>>(new Map())
+  const panStart = useRef({ x: 0, y: 0 })
+  const pointerStart = useRef({ x: 0, y: 0 })
+  const pinchStartDist = useRef(0)
+  const pinchStartZoom = useRef(1)
+  const pinchStartPan = useRef({ x: 0, y: 0 })
+  const pinchStartMid = useRef({ x: 0, y: 0 })
+
+  const handleCanvasPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    // If clicking an overlay container, let that stop propagation or ignore panning
+    const target = e.target as HTMLElement
+    if (
+      target.closest('.overlay-editor') || 
+      target.closest('.overlay-control-handle') || 
+      target.closest('button') || 
+      target.closest('input')
+    ) {
+      return
+    }
+
+    e.currentTarget.setPointerCapture(e.pointerId)
+    activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+    if (activePointers.current.size === 1) {
+      panStart.current = { ...pan }
+      pointerStart.current = { x: e.clientX, y: e.clientY }
+    } else if (activePointers.current.size === 2) {
+      const pts = Array.from(activePointers.current.values())
+      const dx = pts[0].x - pts[1].x
+      const dy = pts[0].y - pts[1].y
+      pinchStartDist.current = Math.hypot(dx, dy)
+      pinchStartZoom.current = zoom
+      pinchStartPan.current = { ...pan }
+      pinchStartMid.current = {
+        x: (pts[0].x + pts[1].x) / 2,
+        y: (pts[0].y + pts[1].y) / 2,
+      }
+    }
+  }, [pan, zoom])
+
+  const handleCanvasPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!activePointers.current.has(e.pointerId)) return
+    activePointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+    if (activePointers.current.size === 2) {
+      const pts = Array.from(activePointers.current.values())
+      const dx = pts[0].x - pts[1].x
+      const dy = pts[0].y - pts[1].y
+      const dist = Math.hypot(dx, dy)
+      const mid = {
+        x: (pts[0].x + pts[1].x) / 2,
+        y: (pts[0].y + pts[1].y) / 2,
+      }
+
+      if (pinchStartDist.current > 0) {
+        const factor = dist / pinchStartDist.current
+        const newZoom = Math.max(0.2, Math.min(8, pinchStartZoom.current * factor))
+        setZoom(newZoom)
+
+        const dxMid = mid.x - pinchStartMid.current.x
+        const dyMid = mid.y - pinchStartMid.current.y
+        setPan({
+          x: pinchStartPan.current.x + dxMid,
+          y: pinchStartPan.current.y + dyMid,
+        })
+      }
+    } else if (activePointers.current.size === 1) {
+      // Single finger drag to pan (only if not drawing/healing/cropping)
+      if (activeTool !== 'draw' && activeTool !== 'healing' && activeTool !== 'crop') {
+        const dx = e.clientX - pointerStart.current.x
+        const dy = e.clientY - pointerStart.current.y
+        setPan({
+          x: panStart.current.x + dx,
+          y: panStart.current.y + dy,
+        })
+      }
+    }
+  }, [zoom, pan, activeTool])
+
+  const handleCanvasPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (activePointers.current.has(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+      activePointers.current.delete(e.pointerId)
+    }
+    if (activePointers.current.size < 2) {
+      pinchStartDist.current = 0
+    }
+  }, [])
+
+  // Mouse wheel zoom centered on cursor
+  useEffect(() => {
+    const el = canvasAreaRef.current
+    if (!el) return
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const rect = el.getBoundingClientRect()
+      const mouseX = e.clientX - rect.left
+      const mouseY = e.clientY - rect.top
+
+      const zoomFactor = 1.08
+      let newZoom = zoom
+      if (e.deltaY < 0) {
+        newZoom = Math.min(8, zoom * zoomFactor)
+      } else {
+        newZoom = Math.max(0.2, zoom / zoomFactor)
+      }
+
+      if (newZoom !== zoom) {
+        const centerX = rect.width / 2
+        const centerY = rect.height / 2
+        const nextPanX = mouseX - centerX - (mouseX - pan.x - centerX) * (newZoom / zoom)
+        const nextPanY = mouseY - centerY - (mouseY - pan.y - centerY) * (newZoom / zoom)
+
+        setZoom(newZoom)
+        setPan({ x: nextPanX, y: nextPanY })
+      }
+    }
+
+    el.addEventListener('wheel', handleWheel, { passive: false })
+    return () => {
+      el.removeEventListener('wheel', handleWheel)
+    }
+  }, [zoom, pan])
+
+  // Drag handler for text/stickers viewport editing
+  const handleDragStart = useCallback((type: 'text' | 'sticker', id: string, initialX: number, initialY: number) => (e: React.PointerEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    
+    const el = e.currentTarget as HTMLElement
+    el.setPointerCapture(e.pointerId)
+    
+    const img = editor.imageRef.current
+    if (!img) return
+    const rect = img.getBoundingClientRect()
+    
+    const startX = e.clientX
+    const startY = e.clientY
+    
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== e.pointerId) return
+      const dx = moveEvent.clientX - startX
+      const dy = moveEvent.clientY - startY
+      const dxPct = (dx / rect.width) * 100
+      const dyPct = (dy / rect.height) * 100
+      
+      const newX = Math.max(0, Math.min(100, initialX + dxPct))
+      const newY = Math.max(0, Math.min(100, initialY + dyPct))
+      
+      if (type === 'text') {
+        editor.updateText(id, { x: newX, y: newY })
+      } else {
+        editor.updateSticker(id, { x: newX, y: newY })
+      }
+    }
+    
+    const onPointerUp = (upEvent: PointerEvent) => {
+      if (upEvent.pointerId !== e.pointerId) return
+      el.releasePointerCapture(e.pointerId)
+      el.removeEventListener('pointermove', onPointerMove)
+      el.removeEventListener('pointerup', onPointerUp)
+    }
+    
+    el.addEventListener('pointermove', onPointerMove)
+    el.addEventListener('pointerup', onPointerUp)
+  }, [editor])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    const file = Array.from(e.dataTransfer.files).find(f => f.type.startsWith('image/'))
+    if (file) { editor.loadImage(file); setZoom(1); setPan({ x: 0, y: 0 }) }
+  }, [editor])
+
+  // ── Layer Routing Logic ───────────────────────────────────────────────────
+  const activeOverlay = activeOverlayId ? editor.overlayLayers.find(l => l.id === activeOverlayId) : null
+  const currentAdjustments = activeOverlay ? activeOverlay.adjustments : editor.adjustments
+  const currentFilter = activeOverlay ? activeOverlay.activeFilter : editor.activeFilter
+
+  const handleAdjustmentChange = useCallback((key: keyof Adjustments, value: number) => {
+    if (activeOverlayId && activeOverlay) {
+      editor.updateOverlayLayer(activeOverlayId, { adjustments: { ...activeOverlay.adjustments, [key]: value } })
+    } else {
+      editor.updateAdjustment(key, value)
+    }
+  }, [activeOverlayId, activeOverlay, editor])
+
+  const handleResetAdjustments = useCallback(() => {
+    if (activeOverlayId && activeOverlay) {
+      editor.updateOverlayLayer(activeOverlayId, { adjustments: { ...DEFAULT_ADJUSTMENTS }, activeFilter: 'none' })
+    } else {
+      editor.resetAdjustments()
+    }
+  }, [activeOverlayId, activeOverlay, editor])
+
+  const handleFilterApply = useCallback((id: string) => {
+    if (activeOverlayId && activeOverlay) {
+      editor.updateOverlayLayer(activeOverlayId, { activeFilter: id })
+    } else {
+      editor.applyFilter(id)
+    }
+  }, [activeOverlayId, activeOverlay, editor])
 
   // ── Welcome Screen ────────────────────────────────────────────────────────
   if (!editor.sourceImage) {
     return (
-      <div
-        className="flex flex-col items-center justify-center relative"
+      <div className="flex flex-col items-center justify-center relative"
         style={{ height: '100dvh', width: '100dvw', background: 'radial-gradient(ellipse at 50% 0%, #0d0d1a 0%, #000 70%)' }}
-        onDragOver={e => e.preventDefault()}
-        onDrop={handleDrop}
-      >
-        {/* Background glow */}
+        onDragOver={e => e.preventDefault()} onDrop={handleDrop}>
         <div style={{ position: 'absolute', top: '30%', left: '50%', transform: 'translate(-50%,-50%)', width: 400, height: 400, background: 'radial-gradient(circle, rgba(0,240,255,0.06) 0%, transparent 70%)', pointerEvents: 'none' }} />
-
-        {/* Logo */}
         <div className="flex flex-col items-center mb-10">
           <div className="w-16 h-16 rounded-3xl flex items-center justify-center mb-4" style={{ background: 'linear-gradient(135deg, #00F0FF 0%, #6366F1 100%)', boxShadow: '0 0 40px rgba(0,240,255,0.3)' }}>
             <span style={{ fontSize: 28, fontWeight: 900, color: '#000', letterSpacing: '-0.05em' }}>Æ</span>
@@ -123,134 +430,130 @@ export default function App() {
           </h1>
           <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', letterSpacing: '0.15em', marginTop: 4 }}>PROFESSIONAL PHOTO EDITOR</p>
         </div>
-
-        {/* Upload zone */}
-        <div
-          onClick={() => fileRef.current?.click()}
+        <div onClick={() => fileRef.current?.click()}
           className="flex flex-col items-center justify-center cursor-pointer rounded-3xl transition-all mx-4"
           style={{ width: 'min(360px, 92vw)', height: 260, border: '2px dashed rgba(0,240,255,0.25)', background: 'rgba(0,240,255,0.03)', backdropFilter: 'blur(4px)' }}
           onDragOver={e => { e.preventDefault(); e.currentTarget.style.borderColor = '#00F0FF'; e.currentTarget.style.background = 'rgba(0,240,255,0.08)' }}
-          onDragLeave={e => { e.currentTarget.style.borderColor = 'rgba(0,240,255,0.25)'; e.currentTarget.style.background = 'rgba(0,240,255,0.03)' }}
-          onDrop={e => { e.preventDefault(); const f = [...e.dataTransfer.files].find(f => f.type.startsWith('image/')); if(f) { editor.loadImage(f); setZoom(1) } }}
-        >
+          onDragLeave={e => { e.currentTarget.style.borderColor = 'rgba(0,240,255,0.25)'; e.currentTarget.style.background = 'rgba(0,240,255,0.03)' }}>
           <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4" style={{ background: 'rgba(0,240,255,0.1)', border: '1px solid rgba(0,240,255,0.2)' }}>
             <Upload size={28} style={{ color: '#00F0FF' }} />
           </div>
           <p className="font-bold text-base" style={{ color: '#fff' }}>Open a Photo</p>
           <p className="text-sm mt-1" style={{ color: 'rgba(255,255,255,0.35)' }}>Tap to browse or drag & drop</p>
-          <p className="text-xs mt-3" style={{ color: 'rgba(255,255,255,0.2)' }}>PNG · JPEG · WebP · AVIF · GIF · BMP</p>
         </div>
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => {
+          if (e.target.files?.[0]) {
+            editor.loadImage(e.target.files[0])
+            setZoom(1)
+            setPan({ x: 0, y: 0 })
+          }
+        }} />
 
-        {/* Feature pills */}
-        <div className="flex flex-wrap justify-center gap-2 mt-8 px-6">
-          {['Adjust','Filters','Crop','Draw','Text','Stickers','Frames','AI Tools'].map(f => (
-            <span key={f} className="px-3 py-1.5 rounded-full text-xs font-semibold"
-              style={{ background: 'rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.4)', border: '1px solid rgba(255,255,255,0.08)' }}>
-              {f}
-            </span>
-          ))}
-        </div>
-
-        <p className="absolute bottom-6 text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>
-          Developed by{' '}
-          <a href="https://lakshan.vercel.app/" target="_blank" rel="noopener noreferrer"
-            style={{ color: 'rgba(0,240,255,0.5)', textDecoration: 'none' }}>
+        {/* Footer */}
+        <div className="absolute bottom-6 left-0 right-0 flex justify-center text-xs text-white/30 tracking-wide font-medium pointer-events-auto">
+          Developed with <span className="text-red-500 mx-1 animate-pulse">❤️</span> by&nbsp;
+          <a 
+            href="https://lakshan.netlify.app/" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="text-cyan-400 font-bold hover:text-cyan-300 transition-colors underline decoration-cyan-400/30 underline-offset-4 hover:decoration-cyan-300"
+          >
             V.P.R. Lakshan Vidanapathirana
           </a>
-        </p>
-        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileInput} />
+        </div>
       </div>
     )
   }
 
-  // ── Editor ────────────────────────────────────────────────────────────────
-  const isCropActive = activeTool === 'crop'
-  const isDrawActive = activeTool === 'draw'
-
   const renderPanel = () => {
     switch (activeTool) {
-      case 'adjust':  return <AdjustPanel adjustments={editor.adjustments} onChange={editor.updateAdjustment} onReset={editor.resetAdjustments} />
-      case 'filters': return <FiltersPanel sourceImage={editor.sourceImage!} activeFilter={editor.activeFilter} onApply={editor.applyFilter} />
-      case 'crop':    return (
-        <CropPanel
-          crop={editor.crop}
-          imageRef={editor.imageRef}
-          onRotate={editor.rotate}
-          onFlipH={editor.flipH}
-          onFlipV={editor.flipV}
-          onAspect={editor.setAspect}
-          onCropRect={editor.setCropRect}
-          onApply={editor.applyCrop}
-          onReset={editor.resetCrop}
+      case 'adjust':  return <AdjustPanel adjustments={currentAdjustments} hslMixer={editor.hslMixer} onChange={handleAdjustmentChange} onHslChange={editor.updateHsl} onReset={handleResetAdjustments} />
+      case 'profiles':return <ProfilesPanel activeProfile={editor.profile} sourceImage={editor.sourceImage!} onApply={editor.applyProfile} />
+      case 'filters': return <FiltersPanel sourceImage={activeOverlay ? activeOverlay.src : editor.sourceImage!} activeFilter={currentFilter} onApply={handleFilterApply} />
+      case 'cutout':  return <CutoutPanel isProcessing={editor.isProcessingCutout} onCutout={editor.cutoutBackground} />
+      case 'crop':    return <CropPanel crop={editor.crop} imageRef={editor.imageRef} onRotate={editor.rotate} onFlipH={editor.flipH} onFlipV={editor.flipV} onAspect={editor.setAspect} onCropRect={editor.setCropRect} onApply={editor.applyCrop} onReset={editor.resetCrop} />
+      case 'geometry':return <GeometryPanel geometry={editor.geometry} onUpdate={editor.updateGeometry} onReset={editor.resetGeometry} />
+      case 'selective':return <SelectivePanel onReset={() => {}} />
+      case 'lensblur':return <LensBlurPanel lensBlur={editor.lensBlur} onUpdate={editor.updateLensBlur} />
+      case 'healing': return (
+        <HealingPanel
+          settings={healingSettings}
+          onSettingsChange={setHealingSettings}
+          canUndo={editor.historyIndex > 0}
+          canRedo={editor.historyIndex < editor.imageHistory.length - 1}
+          onUndo={editor.undoImage}
+          onRedo={editor.redoImage}
         />
       )
-      case 'draw':    return (
-        <DrawPanel
-          strokes={editor.strokes}
-          onUndo={editor.undoStroke}
-          onClear={editor.clearStrokes}
-          settings={drawSettings}
-          onSettings={s => setDrawSettings(prev => ({ ...prev, ...s }))}
-        />
-      )
+      case 'draw':    return <DrawPanel strokes={editor.strokes} onUndo={editor.undoStroke} onClear={editor.clearStrokes} settings={drawSettings} onSettings={s => setDrawSettings(prev => ({ ...prev, ...s }))} />
       case 'text':    return <TextPanel texts={editor.texts} onAdd={editor.addText} onUpdate={editor.updateText} onRemove={editor.removeText} />
       case 'stickers':return <StickersPanel stickers={editor.stickers} onAdd={editor.addSticker} onUpdate={editor.updateSticker} onRemove={editor.removeSticker} />
       case 'frame':   return <FramePanel frame={editor.frame} onUpdate={editor.updateFrame} />
+      case 'layers':  return <LayersPanel layers={editor.overlayLayers} activeLayerId={activeOverlayId} setActiveLayerId={setActiveOverlayId} onUpdateLayer={editor.updateOverlayLayer} onRemoveLayer={editor.removeOverlayLayer} onAddLayerClick={() => overlayFileRef.current?.click()} />
+      case 'presets': return <PresetsPanel customPresets={editor.customPresets} onApplyPreset={editor.applyCustomPreset} onSavePreset={editor.saveCustomPreset} onDeletePreset={editor.deleteCustomPreset} />
+      case 'versions':return <VersionsPanel versions={editor.versions} onSaveVersion={editor.saveVersion} onRestoreVersion={editor.restoreVersion} onDeleteVersion={editor.deleteVersion} />
       case 'pro':     return <ProPanel pro={editor.pro} onUpdatePro={editor.updatePro} onUpdateAdjustments={editor.updateAdjustmentsBulk} />
       case 'more':    return <MorePanel onExport={editor.exportImage} />
       default:        return null
     }
   }
 
+  // ── Frame CSS ─────────────────────────────────────────────────────────────
+  const frameStyle: React.CSSProperties = {}
+  const { frame } = editor
+  if (frame.type !== 'none' && frame.size > 0) {
+    frameStyle.border = `${frame.size}px solid ${frame.color}`
+    frameStyle.borderRadius = frame.cornerRadius ? `${frame.cornerRadius}px` : 0
+    if (frame.type === 'neon-cyan') frameStyle.boxShadow = `0 0 20px ${frame.color}, inset 0 0 20px rgba(0,240,255,0.1)`
+    if (frame.type === 'double') frameStyle.outline = `3px solid ${frame.color}`
+  }
+
   return (
-    <div style={{ height: '100dvh', width: '100dvw', background: '#000', display: 'flex', flexDirection: 'column', fontFamily: 'Inter, sans-serif', overflow: 'hidden' }}>
+    <div style={{ height: '100dvh', width: '100dvw', background: '#000', display: 'flex', flexDirection: 'column', fontFamily: 'Inter, sans-serif', overflow: 'hidden', position: 'fixed', top: 0, left: 0 }}>
 
       {/* ── Top Bar ─────────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between px-3 flex-shrink-0"
-        style={{ height: 50, background: 'rgba(5,5,5,0.98)', borderBottom: '1px solid rgba(255,255,255,0.07)', backdropFilter: 'blur(12px)', zIndex: 30 }}>
-
-        <div className="flex items-center gap-1.5">
+      <div className="flex items-center justify-between px-3 flex-shrink-0 relative z-30"
+        style={{ height: 50, background: 'rgba(5,5,5,0.98)', borderBottom: '1px solid rgba(255,255,255,0.07)', backdropFilter: 'blur(12px)' }}>
+        <div className="flex items-center gap-2">
           <button onClick={() => editor.loadImage(null)}
-            className="w-8 h-8 rounded-lg flex items-center justify-center"
-            style={{ background: 'rgba(255,255,255,0.07)' }}>
-            <X size={15} style={{ color: 'rgba(255,255,255,0.6)' }} />
+            className="w-8 h-8 rounded-lg flex items-center justify-center bg-white/5 text-white/60">
+            <X size={15} />
           </button>
-          <span className="font-black text-sm" style={{ color: '#fff', letterSpacing: '-0.03em' }}>
-            Æ<span style={{ color: '#00F0FF' }}>Edit</span>
-          </span>
-
-          <div style={{ width: 1, height: 18, background: 'rgba(255,255,255,0.1)', margin: '0 4px' }} />
-
-          {/* Before/After toggle */}
-          <button
-            onClick={() => setShowComparison(v => !v)}
-            className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs transition-all"
-            style={{
-              background: showComparison ? 'rgba(251,191,36,0.15)' : 'rgba(255,255,255,0.06)',
-              color: showComparison ? '#fbbf24' : 'rgba(255,255,255,0.5)',
-              border: showComparison ? '1px solid rgba(251,191,36,0.3)' : '1px solid transparent',
-            }}>
-            <Sun size={12} /> Compare
+          <span className="font-black text-sm text-white tracking-tight">Æ<span style={{ color: '#00F0FF' }}>Edit</span></span>
+          <div className="w-px h-5 bg-white/10 mx-1" />
+          <button onClick={() => setShowComparison(v => !v)}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all"
+            style={{ background: showComparison ? 'rgba(251,191,36,0.15)' : 'transparent', color: showComparison ? '#fbbf24' : 'rgba(255,255,255,0.4)', border: showComparison ? '1px solid rgba(251,191,36,0.3)' : '1px solid transparent' }}>
+            <Sun size={12} /> {showComparison ? 'Before' : 'Compare'}
           </button>
+
+          {editor.imageHistory && editor.imageHistory.length > 1 && (
+            <>
+              <div className="w-px h-5 bg-white/10 mx-1" />
+              <div className="flex gap-1">
+                <button onClick={editor.undoImage} disabled={editor.historyIndex <= 0}
+                  className="w-7 h-7 rounded-lg flex items-center justify-center bg-white/5 hover:bg-white/10 text-white/60 active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
+                  title="Undo Pixel Retouch">
+                  <Undo2 size={13} />
+                </button>
+                <button onClick={editor.redoImage} disabled={editor.historyIndex >= editor.imageHistory.length - 1}
+                  className="w-7 h-7 rounded-lg flex items-center justify-center bg-white/5 hover:bg-white/10 text-white/60 active:scale-95 disabled:opacity-30 disabled:pointer-events-none"
+                  title="Redo Pixel Retouch">
+                  <Redo2 size={13} />
+                </button>
+              </div>
+            </>
+          )}
         </div>
 
-        <div className="flex items-center gap-1">
-          <button onClick={() => setZoom(z => Math.max(0.2, +(z - 0.25).toFixed(2)))}
-            className="w-7 h-7 rounded-lg flex items-center justify-center"
-            style={{ background: 'rgba(255,255,255,0.06)' }}>
-            <ZoomOut size={13} style={{ color: 'rgba(255,255,255,0.6)' }} />
+        <div className="flex items-center gap-1.5">
+          <button onClick={() => { setActiveTool('layers'); overlayFileRef.current?.click(); }}
+            className="w-8 h-8 rounded-full flex items-center justify-center bg-white/10 text-white shadow-lg"
+            title="Add Image Layer">
+            <Plus size={15} />
           </button>
-          <span className="font-mono text-xs px-1" style={{ color: 'rgba(255,255,255,0.5)', minWidth: 36, textAlign: 'center' }}>
-            {Math.round(zoom * 100)}%
-          </span>
-          <button onClick={() => setZoom(z => Math.min(8, +(z + 0.25).toFixed(2)))}
-            className="w-7 h-7 rounded-lg flex items-center justify-center"
-            style={{ background: 'rgba(255,255,255,0.06)' }}>
-            <ZoomIn size={13} style={{ color: 'rgba(255,255,255,0.6)' }} />
-          </button>
-          <div style={{ width: 1, height: 18, background: 'rgba(255,255,255,0.1)', margin: '0 4px' }} />
-          <button
-            onClick={() => editor.exportImage('jpeg', 0.95)}
+          <div className="w-px h-5 bg-white/10 mx-1" />
+          <button onClick={() => editor.exportImage('jpeg', 0.95)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold"
             style={{ background: 'linear-gradient(135deg, #00F0FF, #6366F1)', color: '#000' }}>
             <Download size={12} /> Save
@@ -258,217 +561,233 @@ export default function App() {
         </div>
       </div>
 
+      {/* Target Layer Indicator */}
+      {activeOverlayId && (
+        <div className="absolute top-[60px] left-1/2 -translate-x-1/2 z-40 bg-cyan-400 text-black px-4 py-1.5 rounded-full text-xs font-bold shadow-lg flex items-center gap-2 pointer-events-none">
+          <Layers size={14} /> Editing Layer
+        </div>
+      )}
+
       {/* ── Canvas Area ──────────────────────────────────────────────────────── */}
-      <div
-        ref={canvasAreaRef}
-        className="flex-1 relative flex items-center justify-center overflow-hidden"
-        style={{ background: '#0c0c0c', minHeight: 0 }}
-        onDragOver={e => e.preventDefault()}
-        onDrop={handleDrop}
-      >
-        {/* Checkered bg */}
+      <div ref={canvasAreaRef} className="canvas-area flex-1 relative flex items-center justify-center overflow-hidden bg-[#0c0c0c]"
+        onDragOver={e => e.preventDefault()} onDrop={handleDrop}
+        onPointerDown={handleCanvasPointerDown}
+        onPointerMove={handleCanvasPointerMove}
+        onPointerUp={handleCanvasPointerUp}
+        onPointerCancel={handleCanvasPointerUp}
+        style={{ touchAction: 'none' }}>
         <div className="absolute inset-0 checker-bg opacity-40" />
 
-        {/* Image wrapper */}
-        <div
-          className="relative transition-transform"
-          style={{ transform: `scale(${zoom})`, transformOrigin: 'center', userSelect: 'none' }}
-        >
-          <div className="relative" style={frameStyle}>
-            {/* Before/After split */}
+        <div className="editor-image-wrap relative"
+          style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`, transformOrigin: 'center', transition: zoom === 1 && pan.x === 0 && pan.y === 0 ? 'transform 0.2s cubic-bezier(0.25,0.46,0.45,0.94)' : 'none' }}>
+          <div className="relative" style={frameStyle} ref={imageContainerRef}>
+
             {showComparison && (
-              <div className="absolute inset-0 overflow-hidden z-20 pointer-events-none"
-                style={{ clipPath: `inset(0 ${100 - comparisonX}% 0 0)` }}>
-                <img src={editor.sourceImage!} alt="original"
-                  style={{ display: 'block', maxWidth: '100vw', maxHeight: 'calc(100dvh - 50px - 200px)', objectFit: 'contain' }} />
+              <div className="absolute inset-0 overflow-hidden z-20 pointer-events-none" style={{ clipPath: `inset(0 50% 0 0)` }}>
+                <img src={editor.sourceImage!} alt="original" style={{ display: 'block', maxWidth: 'calc(100vw - 16px)', maxHeight: 'calc(100dvh - 50px - 270px)', objectFit: 'contain' }} />
               </div>
             )}
 
-            {/* Main image */}
-            <img
-              ref={editor.imageRef}
-              src={editor.sourceImage!}
-              alt="Editor"
-              draggable={false}
+            <img ref={editor.imageRef} src={editor.sourceImage!} alt="Editor" draggable={false}
               style={{
                 display: 'block',
                 maxWidth: 'calc(100vw - 16px)',
-                maxHeight: 'calc(100dvh - 50px - 200px)',
+                maxHeight: 'calc(100dvh - 50px - 270px)',
                 objectFit: 'contain',
                 filter: editor.cssFilter,
                 transform: editor.cssTransform,
+                WebkitUserSelect: 'none',
                 userSelect: 'none',
               }}
-            />
+              onPointerDown={() => setActiveOverlayId(null)} />
 
-            {/* Crop overlay */}
-            {isCropActive && (
-              <CropOverlay
-                crop={editor.crop}
-                onCropRect={editor.setCropRect}
-                containerRef={canvasAreaRef}
-              />
-            )}
+            {/* Viewport Text Overlays */}
+            {editor.texts.map(t => {
+              let tx = '-50%';
+              if (t.align === 'left') tx = '0%';
+              if (t.align === 'right') tx = '-100%';
 
-            {/* Draw canvas */}
-            <canvas
-              ref={editor.drawRef}
-              className="absolute inset-0 w-full h-full"
-              style={{
-                zIndex: 15,
-                pointerEvents: isDrawActive ? 'auto' : 'none',
-                touchAction: 'none',
-                cursor: isDrawActive ? `crosshair` : 'default',
-              }}
-              onPointerDown={isDrawActive ? drawEvents.onPointerDown : undefined}
-              onPointerMove={isDrawActive ? drawEvents.onPointerMove : undefined}
-              onPointerUp={isDrawActive ? drawEvents.onPointerUp : undefined}
-              onPointerLeave={isDrawActive ? drawEvents.onPointerUp : undefined}
-            />
+              return (
+                <div key={t.id}
+                  onPointerDown={handleDragStart('text', t.id, t.x, t.y)}
+                  style={{
+                    position: 'absolute',
+                    left: `${t.x}%`,
+                    top: `${t.y}%`,
+                    transform: `translate(${tx}, -50%)`,
+                    fontSize: `${t.fontSize}px`,
+                    color: t.color,
+                    opacity: t.opacity / 100,
+                    fontFamily: t.fontFamily || 'Inter, sans-serif',
+                    fontWeight: t.bold ? 'bold' : 'normal',
+                    fontStyle: t.italic ? 'italic' : 'normal',
+                    textAlign: t.align || 'left',
+                    pointerEvents: 'auto',
+                    cursor: 'move',
+                    whiteSpace: 'nowrap',
+                    userSelect: 'none',
+                    WebkitUserSelect: 'none',
+                    zIndex: 20,
+                  }}
+                >
+                  {t.text}
+                </div>
+              );
+            })}
 
-            {/* Pro Preview Overlays (CSS Grain) */}
-            {editor.pro.grain > 0 && (
-              <div className="absolute inset-0 pointer-events-none" style={{ 
-                zIndex: 25, 
-                opacity: editor.pro.grain / 100,
-                mixBlendMode: 'overlay',
-                backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
-              }} />
-            )}
-            
-            {editor.pro.lightleak > 0 && (
-              <div className="absolute inset-0 pointer-events-none" style={{ 
-                zIndex: 26, 
-                opacity: editor.pro.lightleak / 100,
-                mixBlendMode: 'screen',
-                background: 'linear-gradient(135deg, rgba(255,165,50,0.6) 0%, rgba(255,100,40,0.2) 40%, rgba(255,70,30,0) 60%)'
-              }} />
-            )}
-
-            {/* Text layers */}
-            {editor.texts.map(t => (
-              <div key={t.id}
-                style={{
-                  position: 'absolute', left: `${t.x}%`, top: `${t.y}%`,
-                  transform: `translate(-50%, -50%) rotate(${t.rotation}deg)`,
-                  color: t.color, fontSize: t.fontSize, fontFamily: t.fontFamily,
-                  fontWeight: t.bold ? 'bold' : 'normal', fontStyle: t.italic ? 'italic' : 'normal',
-                  textAlign: t.align, whiteSpace: 'nowrap', cursor: 'move',
-                  opacity: (t.opacity ?? 100) / 100,
-                  textShadow: '0 1px 6px rgba(0,0,0,0.8)', zIndex: 20, pointerEvents: 'auto',
-                }}
-                onPointerDown={e => {
-                  e.preventDefault()
-                  const rect = canvasAreaRef.current!.getBoundingClientRect()
-                  const sx = e.clientX, sy = e.clientY, ox = t.x, oy = t.y
-                  const move = (mv: PointerEvent) => {
-                    editor.updateText(t.id, {
-                      x: Math.max(0, Math.min(100, ox + ((mv.clientX - sx) / rect.width) * 100)),
-                      y: Math.max(0, Math.min(100, oy + ((mv.clientY - sy) / rect.height) * 100)),
-                    })
-                  }
-                  const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
-                  window.addEventListener('pointermove', move)
-                  window.addEventListener('pointerup', up)
-                }}>
-                {t.text}
-              </div>
-            ))}
-
-            {/* Sticker layers */}
+            {/* Viewport Sticker Overlays */}
             {editor.stickers.map(s => (
               <div key={s.id}
+                onPointerDown={handleDragStart('sticker', s.id, s.x, s.y)}
                 style={{
-                  position: 'absolute', left: `${s.x}%`, top: `${s.y}%`,
+                  position: 'absolute',
+                  left: `${s.x}%`,
+                  top: `${s.y}%`,
                   transform: `translate(-50%, -50%) rotate(${s.rotation}deg)`,
-                  fontSize: s.size, lineHeight: 1, cursor: 'move', zIndex: 20,
-                  userSelect: 'none', pointerEvents: 'auto',
+                  fontSize: `${s.size}px`,
+                  pointerEvents: 'auto',
+                  cursor: 'move',
+                  userSelect: 'none',
+                  WebkitUserSelect: 'none',
+                  zIndex: 20,
+                  lineHeight: 1,
                 }}
-                onPointerDown={e => {
-                  e.preventDefault()
-                  const rect = canvasAreaRef.current!.getBoundingClientRect()
-                  const sx = e.clientX, sy = e.clientY, ox = s.x, oy = s.y
-                  const move = (mv: PointerEvent) => {
-                    editor.updateSticker(s.id, {
-                      x: Math.max(0, Math.min(100, ox + ((mv.clientX - sx) / rect.width) * 100)),
-                      y: Math.max(0, Math.min(100, oy + ((mv.clientY - sy) / rect.height) * 100)),
-                    })
-                  }
-                  const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
-                  window.addEventListener('pointermove', move)
-                  window.addEventListener('pointerup', up)
-                }}>
+              >
                 {s.emoji}
               </div>
             ))}
+
+            {/* Lens Blur Preview */}
+            {editor.lensBlur.enabled && (
+              <div className="absolute inset-0 pointer-events-none z-10" style={{
+                backdropFilter: `blur(${editor.lensBlur.amount / 10}px)`,
+                maskImage: editor.lensBlur.type === 'radial'
+                  ? `radial-gradient(circle ${editor.lensBlur.size}% at ${editor.lensBlur.centerX}% ${editor.lensBlur.centerY}%, transparent 0%, transparent ${editor.lensBlur.size}%, black ${editor.lensBlur.size + editor.lensBlur.feather}%)`
+                  : `linear-gradient(to bottom, black 0%, transparent ${30 - editor.lensBlur.feather}%, transparent ${70 + editor.lensBlur.feather}%, black 100%)`,
+                WebkitMaskImage: editor.lensBlur.type === 'radial'
+                  ? `radial-gradient(circle ${editor.lensBlur.size}% at ${editor.lensBlur.centerX}% ${editor.lensBlur.centerY}%, transparent 0%, transparent ${editor.lensBlur.size}%, black ${editor.lensBlur.size + editor.lensBlur.feather}%)`
+                  : `linear-gradient(to bottom, black 0%, transparent ${30 - editor.lensBlur.feather}%, transparent ${70 + editor.lensBlur.feather}%, black 100%)`,
+              }} />
+            )}
+
+            {/* Overlay Image Layers */}
+            {editor.overlayLayers.map(ol => (
+              <OverlayEditor key={ol.id} layer={ol} 
+                isActive={activeOverlayId === ol.id} 
+                onSelect={() => { setActiveOverlayId(ol.id); setActiveTool('layers'); }}
+                onUpdate={ch => editor.updateOverlayLayer(ol.id, ch)}
+                onRemove={() => { editor.removeOverlayLayer(ol.id); setActiveOverlayId(null); }}
+                containerRef={imageContainerRef} />
+            ))}
+
+            {activeTool === 'crop' && <CropOverlay crop={editor.crop} onCropRect={editor.setCropRect} imageRef={editor.imageRef} />}
+
+            {healingSettings.cloneSource && healingSettings.mode === 'clone' && activeTool === 'healing' && (
+              <div className="absolute border-2 border-dashed border-[#6366F1] rounded-full flex items-center justify-center pointer-events-none animate-pulse"
+                style={{
+                  left: `${healingSettings.cloneSource.x}%`,
+                  top: `${healingSettings.cloneSource.y}%`,
+                  width: Math.max(16, healingSettings.size),
+                  height: Math.max(16, healingSettings.size),
+                  transform: 'translate(-50%, -50%)',
+                  boxShadow: '0 0 10px rgba(99,102,241,0.5), inset 0 0 10px rgba(99,102,241,0.5)',
+                  zIndex: 25
+                }}>
+                <div className="w-1.5 h-1.5 bg-[#6366F1] rounded-full" />
+              </div>
+            )}
+
+            <canvas ref={editor.drawRef} className="absolute inset-0 w-full h-full"
+              style={{
+                zIndex: 15,
+                pointerEvents: (activeTool === 'draw' || activeTool === 'healing') ? 'auto' : 'none',
+                cursor: healingSettings.isSettingCloneSource ? 'cell' : 'crosshair'
+              }}
+              onPointerDown={
+                activeTool === 'draw' ? drawEvents.onPointerDown :
+                activeTool === 'healing' ? handleHealingPointerDown : undefined
+              }
+              onPointerMove={
+                activeTool === 'draw' ? drawEvents.onPointerMove :
+                activeTool === 'healing' ? handleHealingPointerMove : undefined
+              }
+              onPointerUp={
+                activeTool === 'draw' ? drawEvents.onPointerUp :
+                activeTool === 'healing' ? handleHealingPointerUp : undefined
+              } />
           </div>
         </div>
 
-        {/* Before/After slider */}
-        {showComparison && (
-          <div className="absolute inset-x-0 top-0 bottom-0 flex items-center pointer-events-none" style={{ zIndex: 25 }}>
-            <div className="relative w-full h-full pointer-events-auto"
-              onPointerMove={e => {
-                const rect = e.currentTarget.getBoundingClientRect()
-                setComparisonX(Math.max(5, Math.min(95, ((e.clientX - rect.left) / rect.width) * 100)))
-              }}>
-              {/* Divider line */}
-              <div className="absolute top-0 bottom-0" style={{ left: `${comparisonX}%`, width: 2, background: '#00F0FF', zIndex: 30, transform: 'translateX(-50%)' }}>
-                <div className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 rounded-full flex items-center justify-center"
-                  style={{ background: '#00F0FF', color: '#000', fontSize: 14, fontWeight: 900, boxShadow: '0 0 20px rgba(0,240,255,0.5)' }}>
-                  ⟺
-                </div>
-              </div>
-              <div className="absolute top-3 px-2 py-0.5 rounded text-xs font-bold" style={{ left: `${comparisonX - 2}%`, transform: 'translateX(-100%)', background: 'rgba(0,0,0,0.7)', color: '#00F0FF' }}>Before</div>
-              <div className="absolute top-3 px-2 py-0.5 rounded text-xs font-bold" style={{ left: `${comparisonX + 2}%`, background: 'rgba(0,0,0,0.7)', color: '#fff' }}>After</div>
-            </div>
-          </div>
-        )}
+        {/* Sleek Floating Zoom & Workboard Controls */}
+        <div className="absolute bottom-4 right-4 flex items-center gap-2 z-40 bg-black/75 hover:bg-black/85 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 shadow-2xl transition-all duration-300">
+          {/* Zoom Out */}
+          <button 
+            onClick={() => setZoom(z => Math.max(0.2, Math.round((z - 0.1) * 10) / 10))}
+            className="w-7 h-7 rounded-full flex items-center justify-center text-white/75 hover:text-white hover:bg-white/10 active:scale-90 transition-all"
+            title="Zoom Out"
+          >
+            <ZoomOut size={14} />
+          </button>
+          
+          {/* Zoom Level Indicator */}
+          <span className="text-xs font-mono font-bold text-white/90 min-w-[40px] text-center">
+            {Math.round(zoom * 100)}%
+          </span>
+          
+          {/* Zoom In */}
+          <button 
+            onClick={() => setZoom(z => Math.min(8, Math.round((z + 0.1) * 10) / 10))}
+            className="w-7 h-7 rounded-full flex items-center justify-center text-white/75 hover:text-white hover:bg-white/10 active:scale-90 transition-all"
+            title="Zoom In"
+          >
+            <ZoomIn size={14} />
+          </button>
+          
+          <div className="w-px h-4 bg-white/15 mx-1" />
+          
+          {/* Auto Fit Screen */}
+          <button 
+            onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold transition-all active:scale-95 ${
+              zoom === 1 && pan.x === 0 && pan.y === 0 
+                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' 
+                : 'bg-white/5 text-white/80 border border-transparent hover:bg-white/10 hover:text-white'
+            }`}
+            title="Auto Adjust to Screen (Fit)"
+          >
+            <Maximize size={10} /> Auto Fit
+          </button>
+        </div>
       </div>
 
       {/* ── Bottom Panel ────────────────────────────────────────────────────── */}
-      <div className="flex-shrink-0 overflow-hidden"
-        style={{ background: '#0f0f0f', borderTop: '1px solid rgba(255,255,255,0.06)', minHeight: 160, maxHeight: 270 }}>
+      <div className="panel-scroll flex-shrink-0 bg-[#0f0f0f] border-t border-white/5 relative z-40"
+        style={{ height: 210, overflowX: 'hidden' }}>
         {renderPanel()}
       </div>
 
       {/* ── Bottom Tab Bar ───────────────────────────────────────────────────── */}
-      <div className="flex flex-shrink-0 overflow-x-auto"
-        style={{ background: '#080808', borderTop: '1px solid rgba(255,255,255,0.05)', scrollbarWidth: 'none', paddingBottom: 'env(safe-area-inset-bottom)' }}>
-        {/* Open new file */}
-        <button
-          onClick={() => fileRef.current?.click()}
-          className="flex flex-col items-center justify-center py-2.5 gap-0.5 flex-shrink-0 px-3"
-          style={{ color: 'rgba(255,255,255,0.35)', border: 'none', background: 'transparent', cursor: 'pointer' }}>
-          <Upload size={18} />
-          <span style={{ fontSize: 9 }}>Open</span>
-        </button>
-
-        <div style={{ width: 1, background: 'rgba(255,255,255,0.06)', margin: '6px 0', flexShrink: 0 }} />
-
+      <div className="panel-scroll-x flex flex-shrink-0 bg-[#080808] border-t border-white/5 relative z-40 pb-safe">
         {TOOLS.map(tool => (
-          <button key={tool.id} id={`tab-${tool.id}`}
-            onClick={() => handleToolChange(tool.id)}
-            className="flex flex-col items-center justify-center py-2.5 gap-0.5 flex-shrink-0 px-3 relative transition-all"
-            style={{
-              color: activeTool === tool.id ? '#00F0FF' : 'rgba(255,255,255,0.38)',
-              background: 'transparent', border: 'none', cursor: 'pointer', minWidth: 56,
-            }}>
-            {/* Active indicator */}
-            {activeTool === tool.id && (
-              <div className="absolute top-0 left-1/4 right-1/4 rounded-full" style={{ height: 2, background: '#00F0FF' }} />
-            )}
-            <div style={{ transform: activeTool === tool.id ? 'scale(1.12)' : 'scale(1)', transition: 'transform 0.15s' }}>
+          <button key={tool.id} onClick={() => handleToolChange(tool.id)}
+            className="flex flex-col items-center justify-center py-2.5 gap-1 flex-shrink-0 px-3 min-w-[64px] relative"
+            style={{ color: activeTool === tool.id ? (tool.highlight ?? '#00F0FF') : 'rgba(255,255,255,0.4)', transition: 'color 0.2s' }}>
+            {activeTool === tool.id && <div className="absolute top-0 left-1/4 right-1/4 h-0.5 rounded-b-full" style={{ background: tool.highlight ?? '#00F0FF' }} />}
+            <div style={{ transform: activeTool === tool.id ? 'scale(1.15) translateY(-2px)' : 'scale(1)', transition: 'all 0.2s cubic-bezier(0.34,1.56,0.64,1)' }}>
               {tool.icon}
             </div>
-            <span style={{ fontSize: 9, fontWeight: activeTool === tool.id ? 700 : 400 }}>
-              {tool.label}
-            </span>
+            <span style={{ fontSize: 9, fontWeight: activeTool === tool.id ? 700 : 500 }}>{tool.label}</span>
           </button>
         ))}
       </div>
 
-      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileInput} />
+      <input ref={overlayFileRef} type="file" accept="image/*" className="hidden" onChange={e => {
+        if (e.target.files?.[0]) { 
+          editor.addOverlayLayer(URL.createObjectURL(e.target.files[0]));
+          setActiveTool('layers');
+        }
+        if (overlayFileRef.current) overlayFileRef.current.value = '';
+      }} />
     </div>
   )
 }

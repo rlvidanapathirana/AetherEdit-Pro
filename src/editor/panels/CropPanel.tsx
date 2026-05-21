@@ -15,20 +15,25 @@ interface Props {
 }
 
 const ASPECTS = [
-  { id: 'free',  label: 'Free', icon: '⬚' },
-  { id: '1:1',   label: '1:1',  icon: '□' },
-  { id: '16:9',  label: '16:9', icon: '▬' },
-  { id: '4:3',   label: '4:3',  icon: '▭' },
-  { id: '3:2',   label: '3:2',  icon: '▭' },
-  { id: '9:16',  label: '9:16', icon: '▯' },
-  { id: '3:4',   label: '3:4',  icon: '▯' },
+  { id: 'free',  label: 'Free',  icon: '⬚' },
+  { id: '1:1',   label: '1:1',   icon: '□' },
+  { id: '16:9',  label: '16:9',  icon: '▬' },
+  { id: '4:3',   label: '4:3',   icon: '▭' },
+  { id: '3:2',   label: '3:2',   icon: '▭' },
+  { id: '9:16',  label: '9:16',  icon: '▯' },
+  { id: '3:4',   label: '3:4',   icon: '▯' },
+  { id: '2:1',   label: '2:1',   icon: '▬' },
+  { id: '5:4',   label: '5:4',   icon: '▭' },
+  { id: '21:9',  label: '21:9',  icon: '▬' },
 ]
 
+// ── Crop Overlay — fixed to use image rect, not container rect ────────────────
 export const CropOverlay: React.FC<{
   crop: CropState
   onCropRect: (x: number, y: number, w: number, h: number) => void
-  containerRef: React.RefObject<HTMLDivElement>
-}> = ({ crop, onCropRect, containerRef }) => {
+  imageRef: React.RefObject<HTMLImageElement>
+}> = ({ crop, onCropRect, imageRef }) => {
+  const overlayRef = useRef<HTMLDivElement>(null)
   const [dragging, setDragging] = useState<string | null>(null)
   const startRef = useRef({ x: 0, y: 0, cx: 0, cy: 0, cw: 1, ch: 1 })
 
@@ -36,22 +41,28 @@ export const CropOverlay: React.FC<{
 
   const startDrag = useCallback((handle: string) => (e: React.PointerEvent) => {
     e.preventDefault()
+    e.stopPropagation()
     setDragging(handle)
     startRef.current = { x: e.clientX, y: e.clientY, cx: x, cy: y, cw: w, ch: h }
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
   }, [x, y, w, h])
 
   useEffect(() => {
     if (!dragging) return
-    const container = containerRef.current
-    if (!container) return
-    const rect = container.getBoundingClientRect()
-    const pw = rect.width, ph = rect.height
+    const getRect = () => {
+      // Use image element rect for accurate pixel→percent conversion
+      const imgEl = imageRef.current
+      if (imgEl) return imgEl.getBoundingClientRect()
+      return overlayRef.current?.getBoundingClientRect() ?? { width: 1, height: 1 }
+    }
 
     const onMove = (e: PointerEvent) => {
+      const rect = getRect()
+      const pw = rect.width, ph = rect.height
       const dx = (e.clientX - startRef.current.x) / pw
       const dy = (e.clientY - startRef.current.y) / ph
       const { cx, cy, cw, ch } = startRef.current
-      const MIN = 0.05
+      const MIN = 0.04
 
       let nx = cx, ny = cy, nw = cw, nh = ch
 
@@ -69,63 +80,84 @@ export const CropOverlay: React.FC<{
       onCropRect(nx, ny, nw, nh)
     }
     const onUp = () => setDragging(null)
-    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointermove', onMove, { passive: false })
     window.addEventListener('pointerup', onUp)
-    return () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp) }
-  }, [dragging, onCropRect, containerRef])
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [dragging, onCropRect, imageRef])
 
   const px = x * 100, py = y * 100, pw2 = w * 100, ph2 = h * 100
+  const CORNER_SIZE = 28
+
   const HANDLES = [
-    { id: 'nw', cursor: 'nw-resize', style: { top: `${py}%`, left: `${px}%`, transform: 'translate(-50%,-50%)' } },
-    { id: 'ne', cursor: 'ne-resize', style: { top: `${py}%`, left: `${px + pw2}%`, transform: 'translate(-50%,-50%)' } },
-    { id: 'sw', cursor: 'sw-resize', style: { top: `${py + ph2}%`, left: `${px}%`, transform: 'translate(-50%,-50%)' } },
-    { id: 'se', cursor: 'se-resize', style: { top: `${py + ph2}%`, left: `${px + pw2}%`, transform: 'translate(-50%,-50%)' } },
-    { id: 'n',  cursor: 'n-resize',  style: { top: `${py}%`, left: `${px + pw2 / 2}%`, transform: 'translate(-50%,-50%)' } },
-    { id: 's',  cursor: 's-resize',  style: { top: `${py + ph2}%`, left: `${px + pw2 / 2}%`, transform: 'translate(-50%,-50%)' } },
-    { id: 'w',  cursor: 'w-resize',  style: { top: `${py + ph2 / 2}%`, left: `${px}%`, transform: 'translate(-50%,-50%)' } },
-    { id: 'e',  cursor: 'e-resize',  style: { top: `${py + ph2 / 2}%`, left: `${px + pw2}%`, transform: 'translate(-50%,-50%)' } },
+    { id: 'nw', cursor: 'nw-resize', top: py,       left: px,       tx: '-50%', ty: '-50%' },
+    { id: 'ne', cursor: 'ne-resize', top: py,       left: px+pw2,   tx: '-50%', ty: '-50%' },
+    { id: 'sw', cursor: 'sw-resize', top: py+ph2,   left: px,       tx: '-50%', ty: '-50%' },
+    { id: 'se', cursor: 'se-resize', top: py+ph2,   left: px+pw2,   tx: '-50%', ty: '-50%' },
+    { id: 'n',  cursor: 'n-resize',  top: py,       left: px+pw2/2, tx: '-50%', ty: '-50%' },
+    { id: 's',  cursor: 's-resize',  top: py+ph2,   left: px+pw2/2, tx: '-50%', ty: '-50%' },
+    { id: 'w',  cursor: 'w-resize',  top: py+ph2/2, left: px,       tx: '-50%', ty: '-50%' },
+    { id: 'e',  cursor: 'e-resize',  top: py+ph2/2, left: px+pw2,   tx: '-50%', ty: '-50%' },
   ]
 
   return (
-    <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 10 }}>
-      {/* Dark masks */}
-      <div className="absolute inset-0" style={{ background: 'rgba(0,0,0,0.55)', clipPath: `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${px}% ${py}%, ${px}% ${py + ph2}%, ${px + pw2}% ${py + ph2}%, ${px + pw2}% ${py}%, ${px}% ${py}%)` }} />
-      {/* Crop box */}
-      <div
-        className="absolute pointer-events-auto"
+    <div ref={overlayRef} className="absolute inset-0 pointer-events-none" style={{ zIndex: 10, touchAction: 'none' }}>
+      {/* Dark overlay mask */}
+      <div className="absolute inset-0" style={{
+        background: 'rgba(0,0,0,0.55)',
+        clipPath: `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%,
+          ${px}% ${py}%, ${px}% ${py + ph2}%, ${px + pw2}% ${py + ph2}%, ${px + pw2}% ${py}%, ${px}% ${py}%)`,
+      }} />
+
+      {/* Crop box body — draggable */}
+      <div className="absolute pointer-events-auto"
         style={{
           left: `${px}%`, top: `${py}%`, width: `${pw2}%`, height: `${ph2}%`,
-          border: '2px solid #00F0FF', cursor: 'move',
-          boxShadow: '0 0 0 1px rgba(0,240,255,0.3)',
+          border: '2px solid rgba(0,240,255,0.9)',
+          cursor: dragging === 'body' ? 'grabbing' : 'grab',
+          touchAction: 'none',
         }}
-        onPointerDown={startDrag('body')}
-      >
+        onPointerDown={startDrag('body')}>
         {/* Rule-of-thirds grid */}
         {[33.3, 66.6].map(p => (
           <React.Fragment key={p}>
-            <div style={{ position: 'absolute', left: `${p}%`, top: 0, bottom: 0, width: 1, background: 'rgba(255,255,255,0.2)' }} />
-            <div style={{ position: 'absolute', top: `${p}%`, left: 0, right: 0, height: 1, background: 'rgba(255,255,255,0.2)' }} />
+            <div style={{ position: 'absolute', left: `${p}%`, top: 0, bottom: 0, width: 1, background: 'rgba(255,255,255,0.18)', pointerEvents: 'none' }} />
+            <div style={{ position: 'absolute', top: `${p}%`, left: 0, right: 0, height: 1, background: 'rgba(255,255,255,0.18)', pointerEvents: 'none' }} />
           </React.Fragment>
         ))}
+        {/* Corner brackets */}
+        {[{ t: 0, l: 0, tr: 0, tb: '100%' }, { t: 0, l: '100%', tr: '100%', tb: '100%' }].map(() => null)}
       </div>
+
       {/* Handles */}
-      {HANDLES.map(h => (
-        <div key={h.id}
-          className="absolute pointer-events-auto"
+      {HANDLES.map(handle => (
+        <div key={handle.id} className="absolute pointer-events-auto"
           style={{
-            ...h.style, width: 16, height: 16,
-            background: '#00F0FF', borderRadius: 3,
-            cursor: h.cursor, zIndex: 20,
-            boxShadow: '0 0 8px rgba(0,240,255,0.6)',
+            top: `${handle.top}%`, left: `${handle.left}%`,
+            transform: `translate(${handle.tx}, ${handle.ty})`,
+            width: CORNER_SIZE, height: CORNER_SIZE,
+            cursor: handle.cursor, zIndex: 20, touchAction: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}
-          onPointerDown={startDrag(h.id)}
-        />
+          onPointerDown={startDrag(handle.id)}>
+          <div style={{
+            width: handle.id.length === 1 ? 10 : 14,
+            height: handle.id.length === 1 ? 10 : 14,
+            background: '#00F0FF',
+            borderRadius: handle.id.length === 2 ? 4 : '50%',
+            boxShadow: '0 0 10px rgba(0,240,255,0.7), 0 2px 8px rgba(0,0,0,0.5)',
+          }} />
+        </div>
       ))}
     </div>
   )
 }
 
 const CropPanel: React.FC<Props> = ({ crop, imageRef, onRotate, onFlipH, onFlipV, onAspect, onCropRect, onApply, onReset }) => {
+  const fineRotation = crop.rotation % 360
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-4 pt-3 pb-2 flex-shrink-0">
@@ -144,7 +176,7 @@ const CropPanel: React.FC<Props> = ({ crop, imageRef, onRotate, onFlipH, onFlipV
         </div>
       </div>
 
-      {/* Flip & Rotate */}
+      {/* Flip & Rotate buttons */}
       <div className="flex items-center justify-center gap-2 px-4 pb-2 flex-shrink-0">
         {[
           { icon: <RotateCcw size={16} />, label: '-90°', action: () => onRotate(-90) },
@@ -165,19 +197,20 @@ const CropPanel: React.FC<Props> = ({ crop, imageRef, onRotate, onFlipH, onFlipV
         ))}
       </div>
 
-      {/* Fine rotate slider */}
-      <div className="px-5 pb-2 flex-shrink-0">
+      {/* Fine straighten slider */}
+      <div className="px-4 pb-2 flex-shrink-0">
         <div className="flex justify-between mb-1">
           <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>Straighten</span>
-          <span className="font-mono" style={{ color: '#00F0FF', fontSize: 11 }}>{crop.rotation}°</span>
+          <span className="font-mono" style={{ color: '#00F0FF', fontSize: 11 }}>{fineRotation}°</span>
         </div>
-        <input type="range" min={0} max={359} value={crop.rotation}
-          onChange={e => onRotate(Number(e.target.value) - crop.rotation)}
+        <input type="range" min={-45} max={45}
+          value={((fineRotation + 180) % 360) - 180}
+          onChange={e => onRotate(Number(e.target.value) - (((fineRotation + 180) % 360) - 180))}
           style={{ accentColor: '#00F0FF', width: '100%' }} />
       </div>
 
-      {/* Aspect ratio */}
-      <div className="flex gap-2 px-4 pb-3 overflow-x-auto flex-shrink-0" style={{ scrollbarWidth: 'none' }}>
+      {/* Aspect ratio chips */}
+      <div className="flex gap-2 px-4 pb-3 panel-scroll-x flex-shrink-0">
         {ASPECTS.map(a => (
           <button key={a.id} onClick={() => onAspect(a.id)}
             className="flex-shrink-0 flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-all"

@@ -78,7 +78,7 @@ const DrawPanel: React.FC<Props> = ({ strokes, onUndo, onClear, settings, onSett
       </div>
 
       {/* Color palette */}
-      <div className="flex gap-2 px-4 pb-3 overflow-x-auto flex-shrink-0" style={{ scrollbarWidth: 'none' }}>
+      <div className="flex gap-2 px-4 pb-3 panel-scroll-x flex-shrink-0">
         {COLORS.map(c => (
           <button key={c} onClick={() => onSettings({ color: c })}
             className="flex-shrink-0 w-8 h-8 rounded-full transition-all"

@@ -106,7 +106,7 @@ const TextPanel: React.FC<Props> = ({ texts, onAdd, onUpdate, onRemove }) => {
 
       {/* Text list */}
       {texts.length > 0 && (
-        <div className="flex gap-2 px-4 pb-2 overflow-x-auto flex-shrink-0" style={{ scrollbarWidth: 'none' }}>
+        <div className="flex gap-2 px-4 pb-2 panel-scroll-x flex-shrink-0">
           {texts.map(t => (
             <button
               key={t.id}
@@ -176,7 +176,7 @@ const TextPanel: React.FC<Props> = ({ texts, onAdd, onUpdate, onRemove }) => {
           </div>
 
           {/* Font family */}
-          <div className="flex gap-2 overflow-x-auto items-center" style={{ scrollbarWidth: 'none' }}>
+          <div className="flex gap-2 panel-scroll-x items-center">
             <button onClick={() => fontFileRef.current?.click()}
               className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold transition-all"
               style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1.5px dashed rgba(255,255,255,0.3)' }}>
@@ -201,7 +201,7 @@ const TextPanel: React.FC<Props> = ({ texts, onAdd, onUpdate, onRemove }) => {
           {/* Color picker */}
           <div className="flex items-center gap-2">
             <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', flexShrink: 0 }}>Color</span>
-            <div className="flex gap-1.5 overflow-x-auto flex-1" style={{ scrollbarWidth: 'none' }}>
+            <div className="flex gap-1.5 panel-scroll-x flex-1">
               {COLORS.map(c => (
                 <button key={c} onClick={() => onUpdate(sel.id, { color: c })}
                   className="w-7 h-7 rounded-full flex-shrink-0 transition-all"

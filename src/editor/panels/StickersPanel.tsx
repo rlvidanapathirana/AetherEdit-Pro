@@ -66,7 +66,7 @@ const StickersPanel: React.FC<Props> = ({ stickers, onAdd, onUpdate, onRemove })
       )}
 
       {/* Category tabs */}
-      <div className="flex gap-1.5 px-4 pb-2 overflow-x-auto flex-shrink-0" style={{ scrollbarWidth: 'none' }}>
+      <div className="flex gap-1.5 px-4 pb-2 panel-scroll-x flex-shrink-0">
         {STICKER_SETS.map((set, i) => (
           <button key={i} onClick={() => setActiveSet(i)}
             className="flex-shrink-0 px-2.5 py-1 rounded-full text-xs transition-all"
@@ -97,7 +97,7 @@ const StickersPanel: React.FC<Props> = ({ stickers, onAdd, onUpdate, onRemove })
 
       {/* Active stickers row */}
       {stickers.length > 0 && (
-        <div className="flex gap-2 px-4 pb-2 overflow-x-auto flex-shrink-0" style={{ scrollbarWidth: 'none' }}>
+        <div className="flex gap-2 px-4 pb-2 panel-scroll-x flex-shrink-0">
           {stickers.map(s => (
             <button key={s.id} onClick={() => setSelectedId(s.id === selectedId ? null : s.id)}
               className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-all"
