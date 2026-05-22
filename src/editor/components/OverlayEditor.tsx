@@ -76,7 +76,7 @@ export const OverlayEditor: React.FC<Props> = ({ layer, isActive, onSelect, onUp
   }, [dragging, layer, onUpdate, containerRef])
 
   return (
-    <div className="absolute"
+    <div className="absolute overlay-editor"
       style={{
         left: `${layer.x}%`, top: `${layer.y}%`, width: `${layer.width}%`,
         transform: `translate(-50%, -50%) rotate(${layer.rotation}deg)`,

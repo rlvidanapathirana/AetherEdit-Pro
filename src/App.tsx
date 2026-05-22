@@ -57,7 +57,10 @@ export default function App() {
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [showComparison, setShowComparison] = useState(false)
+  const [showAbout, setShowAbout] = useState(false)
   const [activeOverlayId, setActiveOverlayId] = useState<string | null>(null)
+  const [activeSelectiveId, setActiveSelectiveId] = useState<string | null>(null)
+  const [selectiveBrushSize, setSelectiveBrushSize] = useState(30)
   const [drawSettings, setDrawSettings] = useState<DrawSettings>({ color: '#ffffff', size: 8, opacity: 100, tool: 'pen' })
   const [healingSettings, setHealingSettings] = useState({
     mode: 'spot' as 'spot' | 'clone',
@@ -73,6 +76,15 @@ export default function App() {
   const imageContainerRef = useRef<HTMLDivElement>(null) as React.RefObject<HTMLDivElement>
 
   const drawEvents = useDrawCanvas(editor.drawRef, canvasAreaRef, editor.strokes, editor.addStroke, drawSettings)
+  
+  const activeSelectiveEdit = activeSelectiveId ? editor.selectiveEdits.find(s => s.id === activeSelectiveId) : null
+  const selectiveDrawEvents = useDrawCanvas(
+    editor.drawRef, 
+    canvasAreaRef, 
+    activeSelectiveEdit ? activeSelectiveEdit.strokes : [], 
+    (stroke) => { if (activeSelectiveId) editor.addSelectiveStroke(activeSelectiveId, stroke) }, 
+    { color: 'rgba(239, 68, 68, 0.45)', size: selectiveBrushSize, opacity: 100, tool: 'brush' }
+  )
 
   const handleHealingPointerDown = useCallback((e: React.PointerEvent) => {
     const img = editor.imageRef.current
@@ -425,7 +437,7 @@ export default function App() {
           <div className="w-16 h-16 rounded-3xl flex items-center justify-center mb-4" style={{ background: 'linear-gradient(135deg, #00F0FF 0%, #6366F1 100%)', boxShadow: '0 0 40px rgba(0,240,255,0.3)' }}>
             <span style={{ fontSize: 28, fontWeight: 900, color: '#000', letterSpacing: '-0.05em' }}>Æ</span>
           </div>
-          <h1 className="font-black text-2xl" style={{ color: '#fff', letterSpacing: '-0.04em' }}>
+          <h1 className="font-black text-2xl cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setShowAbout(true)} style={{ color: '#fff', letterSpacing: '-0.04em' }}>
             AetherEdit <span style={{ color: '#00F0FF' }}>Pro</span>
           </h1>
           <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', letterSpacing: '0.15em', marginTop: 4 }}>PROFESSIONAL PHOTO EDITOR</p>
@@ -473,7 +485,20 @@ export default function App() {
       case 'cutout':  return <CutoutPanel isProcessing={editor.isProcessingCutout} onCutout={editor.cutoutBackground} />
       case 'crop':    return <CropPanel crop={editor.crop} imageRef={editor.imageRef} onRotate={editor.rotate} onFlipH={editor.flipH} onFlipV={editor.flipV} onAspect={editor.setAspect} onCropRect={editor.setCropRect} onApply={editor.applyCrop} onReset={editor.resetCrop} />
       case 'geometry':return <GeometryPanel geometry={editor.geometry} onUpdate={editor.updateGeometry} onReset={editor.resetGeometry} />
-      case 'selective':return <SelectivePanel onReset={() => {}} />
+      case 'selective':return (
+        <SelectivePanel 
+          selectiveEdits={editor.selectiveEdits} 
+          activeId={activeSelectiveId} 
+          setActiveId={setActiveSelectiveId}
+          onAdd={editor.addSelectiveEdit}
+          onUpdate={(ch) => activeSelectiveId && editor.updateSelectiveEdit(activeSelectiveId, ch)}
+          onRemove={(id) => { editor.removeSelectiveEdit(id); if (activeSelectiveId === id) setActiveSelectiveId(null) }}
+          brushSize={selectiveBrushSize}
+          onBrushSizeChange={setSelectiveBrushSize}
+          onUndo={() => activeSelectiveId && editor.undoSelectiveStroke(activeSelectiveId)}
+          onClear={() => activeSelectiveId && editor.clearSelectiveStrokes(activeSelectiveId)}
+        />
+      )
       case 'lensblur':return <LensBlurPanel lensBlur={editor.lensBlur} onUpdate={editor.updateLensBlur} />
       case 'healing': return (
         <HealingPanel
@@ -519,7 +544,7 @@ export default function App() {
             className="w-8 h-8 rounded-lg flex items-center justify-center bg-white/5 text-white/60">
             <X size={15} />
           </button>
-          <span className="font-black text-sm text-white tracking-tight">Æ<span style={{ color: '#00F0FF' }}>Edit</span></span>
+          <span className="font-black text-sm text-white tracking-tight cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setShowAbout(true)}>Æ<span style={{ color: '#00F0FF' }}>Edit</span></span>
           <div className="w-px h-5 bg-white/10 mx-1" />
           <button onClick={() => setShowComparison(v => !v)}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all"
@@ -598,6 +623,7 @@ export default function App() {
                 transform: editor.cssTransform,
                 WebkitUserSelect: 'none',
                 userSelect: 'none',
+                clipPath: editor.crop.applied ? `inset(${editor.crop.y * 100}% ${(1 - editor.crop.x - editor.crop.w) * 100}% ${(1 - editor.crop.y - editor.crop.h) * 100}% ${editor.crop.x * 100}%)` : undefined,
               }}
               onPointerDown={() => setActiveOverlayId(null)} />
 
@@ -674,7 +700,7 @@ export default function App() {
             {editor.overlayLayers.map(ol => (
               <OverlayEditor key={ol.id} layer={ol} 
                 isActive={activeOverlayId === ol.id} 
-                onSelect={() => { setActiveOverlayId(ol.id); setActiveTool('layers'); }}
+                onSelect={() => { setActiveOverlayId(ol.id); }}
                 onUpdate={ch => editor.updateOverlayLayer(ol.id, ch)}
                 onRemove={() => { editor.removeOverlayLayer(ol.id); setActiveOverlayId(null); }}
                 containerRef={imageContainerRef} />
@@ -700,19 +726,22 @@ export default function App() {
             <canvas ref={editor.drawRef} className="absolute inset-0 w-full h-full"
               style={{
                 zIndex: 15,
-                pointerEvents: (activeTool === 'draw' || activeTool === 'healing') ? 'auto' : 'none',
+                pointerEvents: (activeTool === 'draw' || activeTool === 'healing' || activeTool === 'selective') ? 'auto' : 'none',
                 cursor: healingSettings.isSettingCloneSource ? 'cell' : 'crosshair'
               }}
               onPointerDown={
                 activeTool === 'draw' ? drawEvents.onPointerDown :
+                activeTool === 'selective' ? selectiveDrawEvents.onPointerDown :
                 activeTool === 'healing' ? handleHealingPointerDown : undefined
               }
               onPointerMove={
                 activeTool === 'draw' ? drawEvents.onPointerMove :
+                activeTool === 'selective' ? selectiveDrawEvents.onPointerMove :
                 activeTool === 'healing' ? handleHealingPointerMove : undefined
               }
               onPointerUp={
                 activeTool === 'draw' ? drawEvents.onPointerUp :
+                activeTool === 'selective' ? selectiveDrawEvents.onPointerUp :
                 activeTool === 'healing' ? handleHealingPointerUp : undefined
               } />
           </div>
@@ -783,11 +812,48 @@ export default function App() {
 
       <input ref={overlayFileRef} type="file" accept="image/*" className="hidden" onChange={e => {
         if (e.target.files?.[0]) { 
-          editor.addOverlayLayer(URL.createObjectURL(e.target.files[0]));
+          const newId = editor.addOverlayLayer(URL.createObjectURL(e.target.files[0]));
+          setActiveOverlayId(newId);
           setActiveTool('layers');
         }
         if (overlayFileRef.current) overlayFileRef.current.value = '';
       }} />
+
+      {/* ── About Modal ──────────────────────────────────────────────────────── */}
+      {showAbout && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm transition-all" onClick={() => setShowAbout(false)}>
+          <div className="bg-[#111] border border-white/10 rounded-3xl p-6 max-w-sm w-full shadow-2xl relative" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setShowAbout(false)} className="absolute top-4 right-4 text-white/50 hover:text-white bg-white/5 hover:bg-white/10 rounded-full w-8 h-8 flex items-center justify-center transition-all">
+              <X size={16} />
+            </button>
+            <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-5" style={{ background: 'linear-gradient(135deg, #00F0FF 0%, #6366F1 100%)', boxShadow: '0 0 30px rgba(0,240,255,0.3)' }}>
+              <span style={{ fontSize: 24, fontWeight: 900, color: '#000', letterSpacing: '-0.05em' }}>Æ</span>
+            </div>
+            <h2 className="text-xl font-black text-white mb-2 tracking-tight">Elevate Your Visuals with AetherEdit Pro</h2>
+            <p className="text-sm text-white/70 mb-4 leading-relaxed">
+              AetherEdit Pro is a powerful, seamless, and professional photo editor built for modern creators. Bring your creative vision to life with precision editing tools wrapped in a stunning, user-friendly workspace.
+            </p>
+            <p className="text-sm font-bold text-cyan-400 mb-6 bg-cyan-400/10 p-3 rounded-xl border border-cyan-400/20">
+              Free forever. No limits, no catches. Drag, drop, and redefine your photography today.
+            </p>
+            
+            <div className="space-y-3 pt-4 border-t border-white/10">
+              <p className="text-xs text-white/60">
+                Developer: <strong className="text-white">V.P.R. Lakshan Vidanapathirana</strong>
+              </p>
+              <a href="mailto:rlvidanapathirana@gmail.com" className="flex items-center gap-2 text-xs text-indigo-400 hover:text-indigo-300 font-bold transition-colors">
+                <span className="w-6 h-6 rounded-lg bg-indigo-500/20 flex items-center justify-center text-indigo-400">📩</span>
+                Contact for updates
+              </a>
+            </div>
+            
+            <div className="mt-6 pt-4 border-t border-white/5 text-[10px] text-white/40 leading-relaxed">
+              Copyright © {new Date().getFullYear()} <a href="https://lakshan.netlify.app/" target="_blank" rel="noopener noreferrer" className="hover:text-cyan-400 underline decoration-white/20 hover:decoration-cyan-400/50 underline-offset-2 transition-all">V.P.R. Lakshan Vidanapathirana</a>.
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+

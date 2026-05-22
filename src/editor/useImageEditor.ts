@@ -64,6 +64,13 @@ export interface OverlayLayer {
   adjustments: Adjustments; activeFilter: string
 }
 
+export interface SelectiveEdit {
+  id: string
+  strokes: DrawStroke[]
+  adjustments: Adjustments
+}
+
+
 export interface EditVersion {
   id: string; label: string; timestamp: number
   adjustments: Adjustments; activeFilter: string
@@ -526,8 +533,9 @@ export function useImageEditor() {
   const [frame,          setFrame]          = useState<FrameSettings>({ type: 'none', color: '#ffffff', size: 20, cornerRadius: 0 })
   const [pro,            setPro]            = useState<ProEffects>({ ...DEFAULT_PRO })
   const [overlayLayers,  setOverlayLayers]  = useState<OverlayLayer[]>([])
+  const [selectiveEdits, setSelectiveEdits] = useState<SelectiveEdit[]>([])
   const [versions,       setVersions]       = useState<EditVersion[]>([])
-  const [customPresets,  setCustomPresets]  = useState<CustomPreset[]>([])
+  const [customPresets,  setCustomPresets]  = useState<CustomPreset[]>(BUILTIN_PRESETS)
   const [isProcessingCutout, setIsProcessingCutout] = useState(false)
   const [canvasSize,     setCanvasSize]     = useState({ width: 0, height: 0 })
   const imageRef = useRef<HTMLImageElement>(null) as React.RefObject<HTMLImageElement>
@@ -583,7 +591,7 @@ export function useImageEditor() {
     setGeometry({ ...DEFAULT_GEO }); setLensBlur({ ...DEFAULT_LENS_BLUR })
     setTexts([]); setStickers([]); setStrokes([])
     setFrame({ type: 'none', color: '#ffffff', size: 20, cornerRadius: 0 })
-    setPro({ ...DEFAULT_PRO }); setOverlayLayers([])
+    setPro({ ...DEFAULT_PRO }); setOverlayLayers([]); setSelectiveEdits([])
   }, [])
 
   // ── Adjustments ───────────────────────────────────────────────────────────
@@ -673,6 +681,7 @@ export function useImageEditor() {
       id, src, x: 50, y: 50, width: 60, opacity: 100, blendMode: 'normal', rotation: 0,
       adjustments: { ...DEFAULT_ADJUSTMENTS }, activeFilter: 'none'
     }])
+    return id
   }, [])
   const updateOverlayLayer = useCallback((id: string, ch: Partial<OverlayLayer>) => {
     setOverlayLayers(p => p.map(l => l.id === id ? { ...l, ...ch } : l))
@@ -680,6 +689,29 @@ export function useImageEditor() {
   const removeOverlayLayer = useCallback((id: string) => {
     setOverlayLayers(p => p.filter(l => l.id !== id))
   }, [])
+
+  // ── Selective Edits ───────────────────────────────────────────────────────
+  const addSelectiveEdit = useCallback(() => {
+    const id = `se-${Date.now()}`
+    setSelectiveEdits(p => [...p, { id, strokes: [], adjustments: { ...DEFAULT_ADJUSTMENTS } }])
+    return id
+  }, [])
+  const updateSelectiveEdit = useCallback((id: string, ch: Partial<SelectiveEdit>) => {
+    setSelectiveEdits(p => p.map(s => s.id === id ? { ...s, ...ch } : s))
+  }, [])
+  const removeSelectiveEdit = useCallback((id: string) => {
+    setSelectiveEdits(p => p.filter(s => s.id !== id))
+  }, [])
+  const addSelectiveStroke = useCallback((id: string, stroke: DrawStroke) => {
+    setSelectiveEdits(p => p.map(s => s.id === id ? { ...s, strokes: [...s.strokes, stroke] } : s))
+  }, [])
+  const undoSelectiveStroke = useCallback((id: string) => {
+    setSelectiveEdits(p => p.map(s => s.id === id ? { ...s, strokes: s.strokes.slice(0, -1) } : s))
+  }, [])
+  const clearSelectiveStrokes = useCallback((id: string) => {
+    setSelectiveEdits(p => p.map(s => s.id === id ? { ...s, strokes: [] } : s))
+  }, [])
+
 
   // ── Cutout Background ─────────────────────────────────────────────────────
   const cutoutBackground = useCallback(async () => {
@@ -899,6 +931,51 @@ export function useImageEditor() {
       }
     }
 
+    // Selective Edits
+    for (const se of selectiveEdits) {
+      if (se.strokes.length === 0) continue;
+      
+      const maskCanvas = document.createElement('canvas')
+      maskCanvas.width = canvas.width; maskCanvas.height = canvas.height
+      const mctx = maskCanvas.getContext('2d')!
+      
+      se.strokes.forEach(s => {
+        if (s.points.length < 2) return
+        mctx.save()
+        mctx.globalAlpha = s.opacity / 100
+        mctx.strokeStyle = 'black'
+        mctx.lineWidth = s.width * (canvas.width / img.clientWidth)
+        mctx.lineCap = 'round'
+        mctx.lineJoin = 'round'
+        mctx.shadowBlur = mctx.lineWidth
+        mctx.shadowColor = 'black'
+        mctx.beginPath()
+        mctx.moveTo(s.points[0].x * (canvas.width/img.clientWidth), s.points[0].y * (canvas.height/img.clientHeight))
+        for (let i = 1; i < s.points.length; i++) {
+          const prevX = s.points[i-1].x * (canvas.width/img.clientWidth)
+          const prevY = s.points[i-1].y * (canvas.height/img.clientHeight)
+          const curX = s.points[i].x * (canvas.width/img.clientWidth)
+          const curY = s.points[i].y * (canvas.height/img.clientHeight)
+          const midX = (prevX + curX) / 2
+          const midY = (prevY + curY) / 2
+          mctx.quadraticCurveTo(prevX, prevY, midX, midY)
+        }
+        mctx.stroke()
+        mctx.restore()
+      })
+
+      const adjCanvas = document.createElement('canvas')
+      adjCanvas.width = canvas.width; adjCanvas.height = canvas.height
+      const actx = adjCanvas.getContext('2d')!
+      ;(actx as any).filter = buildCSSFilter(se.adjustments, 'none')
+      actx.drawImage(canvas, 0, 0)
+      
+      actx.globalCompositeOperation = 'destination-in'
+      actx.drawImage(maskCanvas, 0, 0)
+      
+      ctx.drawImage(adjCanvas, 0, 0)
+    }
+
     // Overlay layers
     for (const ol of overlayLayers) {
       const olImg = new Image(); olImg.src = ol.src
@@ -973,6 +1050,8 @@ export function useImageEditor() {
     addStroke, clearStrokes, undoStroke,
     updateFrame, updatePro, exportImage,
     addOverlayLayer, updateOverlayLayer, removeOverlayLayer,
+    selectiveEdits, addSelectiveEdit, updateSelectiveEdit, removeSelectiveEdit,
+    addSelectiveStroke, undoSelectiveStroke, clearSelectiveStrokes,
     cutoutBackground, isProcessingCutout,
     saveVersion, restoreVersion, deleteVersion,
     saveCustomPreset, applyCustomPreset, deleteCustomPreset,
